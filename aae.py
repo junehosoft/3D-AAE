@@ -5,6 +5,8 @@ import os
 import numpy as np
 import math
 import itertools
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
@@ -46,6 +48,7 @@ class Encoder(nn.Module):
             nn.BatchNorm3d(INTER_CH_4),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(INTER_CH_4, LATENT_DIM, 4, stride=1),
+            #nn.Tanh()
         )
 
 
@@ -88,11 +91,11 @@ class Discriminator(nn.Module):
 
         self.model = nn.Sequential(
             # nn.Linear(LATENT_DIM + N_CLASSES, INTER_DIM_1),
-            nn.Linear(LATENT_DIM, INTER_DIM_1),
+            nn.Linear(LATENT_DIM, INTER_DIM_0),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(INTER_DIM_1, INTER_DIM_3),
+            nn.Linear(INTER_DIM_0, INTER_DIM_2),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(INTER_DIM_3, 1),
+            nn.Linear(INTER_DIM_2, 1),
             nn.Sigmoid(),
         )
 
@@ -116,18 +119,11 @@ def sample_image(decoder, n_row, path, name, fixed_noise=None, individual=False)
             for i in range(gen_vox.shape[0]): # save them one by one
                 fig = plt.figure()
                 ax = fig.gca(projection='3d')
+                gen_vox[i] = gen_vox[i].swapaxes(1, 2)
                 ax.voxels(np.around(gen_vox[i]), facecolors='red')
                 plt.axis('off')
                 plt.savefig("{}/{}_{}.png".format(path, name, i), bbox_inches='tight')
-            # save_image(gen_imgs.data[i, :, :, :], "%s/%s_%d.png" % (path, name, i), normalize=True)
-    #else: # create grid
-    #    save_image(gen_imgs.data, "%s/%s.png" % (path, name), nrow=n_row, normalize=True)
-
-
-#def sample_image_fixed(decoder, fixed_noise, n_row, name):
-#    """Saves a grid of generated digits"""
-#    gen_imgs = decoder(fixed_noise)
-#    save_image(gen_imgs.data, "images/%s.png" % name, nrow=n_row, normalize=True)
+                plt.close()
 
 
 

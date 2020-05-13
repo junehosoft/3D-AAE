@@ -28,46 +28,6 @@ import torch
 # ----------
 cuda = True if torch.cuda.is_available() else False
 
-def class_noise(class_num, dim, size):
-	'''if class_num == CATEGORIES[0]:
-		mu = 3
-	else:
-		mu = -3
-	mean = np.ones(dim) * mu
-	cov = np.diag(np.ones(dim))
-	arr = np.random.multivariate_normal(mean, cov, size)'''
-	l = class_num
-	half = int(dim/2)
-	m1 = 10*np.cos((l*2*np.pi)/10)
-	m2 = 10*np.sin((l*2*np.pi)/10)
-	mean = [m1, m2]
-	mean = np.tile(mean, half)
-	v1 = [np.cos((l*2*np.pi)/10), np.sin((l*2*np.pi)/10)]
-	v2 = [-np.sin((l*2*np.pi)/10), np.cos((l*2*np.pi)/10)]
-	a1 = 8
-	a2 = .4
-	M =np.vstack((v1,v2)).T
-	S = np.array([[a1, 0], [0, a2]])
-	c = np.dot(np.dot(M, S), np.linalg.inv(M))
-	cov = np.zeros((dim, dim))
-	for i in range(half):
-		cov[i*2:(i+1)*2, i*2:(i+1)*2] = c
-	#cov = cov*cov.T
-	vec = np.random.multivariate_normal(mean=mean, cov=cov,
-										size=size)
-	return vec
-
-def sample_noise(size):
-	noise_vector = np.zeros((size, LATENT_DIM))
-	section = int(size/N_CLASSES)
-	for i in range(section):
-		noise_vector[i, :] = np.array(np.random.uniform(0, 1, LATENT_DIM))
-	#for i in range(N_CLASSES):
-		# noise_vector[i*section:min((i+1)*section, size), :] = class_noise(i, LATENT_DIM, min(section, size-section*i))
-
-
-	return noise_vector
-
 def make_one_hot_real(size):
 	section = int(size/N_CLASSES)
 	indices = []
@@ -78,9 +38,6 @@ def make_one_hot_real(size):
 	return arr
 
 def one_hot_encode(index_arr, size):
-	'''arr = np.zeros((len(index1) + len(index2), N_CLASSES))
-	arr[index1, 0] = 1
-	arr[index2, 1] = 1'''
 	arr = np.zeros((size, N_CLASSES))
 	for i in range(len(index_arr)):
 		arr[index_arr[i], i] = 1
@@ -105,7 +62,6 @@ def train(b1, b2):
 		pixelwise_loss.cuda()
 
 	# Configure data loader
-	# os.makedirs("../../data/deepfashion", exist_ok=True)
 	dataloader = torch.utils.data.DataLoader(
 		VoxelDataset(),
 		batch_size=TRAIN_BATCH_SIZE,
@@ -120,14 +76,8 @@ def train(b1, b2):
 	optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=LR_D, betas=(b1, b2))
 
 	Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
-	# generate fixed noise vector
-	#fixed_noise = Variable(Tensor(np.random.normal(0, 1, (n_row ** 2, LATENT_DIM))))
-	#noise_vector = np.zeros((n_row**2, LATENT_DIM))
-	#noise_vector[:50,:] = class_noise(CATEGORIES[0], LATENT_DIM, 50)
-	#noise_vector[50:,:] = class_noise(CATEGORIES[1], LATENT_DIM, 50)
 	n_row = 1
-	fixed_noise = Variable(Tensor(sample_noise(n_row**2)))
+	fixed_noise = Variable(Tensor(sample_noise(n_row**2, LATENT_DIM)))
 	# make directory for saving images
 	path = "/".join([str(c) for c in [GENERATED_BASE, "aae", "_".join([CONFIG_AS_STR, opt.tag]), 'train']])
 	os.makedirs(path, exist_ok=True)
@@ -138,6 +88,7 @@ def train(b1, b2):
 	D_x = []
 	#one_hot_label = one_hot_encode(range(int(TRAIN_BATCH_SIZE/2)), range(int(TRAIN_BATCH_SIZE/2), TRAIN_BATCH_SIZE))
 	# one_hot_label = make_one_hot_real(TRAIN_BATCH_SIZE)
+	means, covs = class_noise(LATENT_DIM, N_CLASSES)
 	print("done getting hot labels")
 	# training loop 
 	for epoch in range(N_EPOCHS):
@@ -150,14 +101,19 @@ def train(b1, b2):
 			fake = Variable(Tensor(voxels.shape[0], 1).fill_(0.0), requires_grad=False)
 
 			# ---------------------
-			#  Train Generator
+			#  Train Discriminator
 			# ---------------------
 
 			optimizer_D.zero_grad()
 
 			# Sample noise as discriminator ground truth
-			#z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], LATENT_DIM))))
-			z = Variable(Tensor(sample_noise(voxels.shape[0])))
+			size = len(labels)
+			noise_vector = np.zeros((size, LATENT_DIM))
+			for j in range(size):
+				l = int(labels[j])
+				noise_vector[j, :] = np.random.multivariate_normal(mean=means[0], cov=covs[0],size=1)
+			z = Variable(Tensor(noise_vector))
+			#z = Variable(Tensor(sample_noise(voxels.shape[0], LATENT_DIM)))
 			#if imgs.shape[0] == TRAIN_BATCH_SIZE:
 			#	real_labels = Variable(Tensor(one_hot_label))
 			#else:
@@ -171,9 +127,6 @@ def train(b1, b2):
 			#print("made fake labels")
 			# Measure discriminator's ability to classify real from generated samples
 			real_loss = adversarial_loss(discriminator(z), valid) #real_labels), valid)
-			#print(encoded_voxels.shape)
-			#print(fake.shape)
-			#guess
 			fake_loss = adversarial_loss(discriminator(encoded_voxels.detach()), fake)# fake_labels), fake)
 			d_loss = 0.5 * (real_loss + fake_loss)
 
@@ -182,16 +135,16 @@ def train(b1, b2):
 
 			if i % N_CRITIC == 0:
 				# -----------------
-				#  Train Discriminator
+				#  Train Generator
 				# -----------------
 
 				optimizer_G.zero_grad()
 
 				encoded_voxels = encoder(real_voxels)
-				decoded_voxels = torch.round(decoder(encoded_voxels))
+				decoded_voxels = decoder(encoded_voxels)
 
 				# Loss measures generator's ability to fool the discriminator
-				g_loss = 0.5 * adversarial_loss(discriminator(encoded_voxels), valid) + 0.5 * pixelwise_loss(
+				g_loss = 0.9 * adversarial_loss(discriminator(encoded_voxels), valid) + 0.1 * pixelwise_loss(
 					decoded_voxels, real_voxels
 				)
 
@@ -200,7 +153,7 @@ def train(b1, b2):
 
 			batches_done = epoch * len(dataloader) + i
 
-			if batches_done % 1 == 0:
+			if batches_done % 2 == 0:
 				print(
 					"[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
 					% (epoch, N_EPOCHS, i, len(dataloader), d_loss.item(), g_loss.item())
@@ -217,13 +170,6 @@ def train(b1, b2):
 			G_losses.append(g_loss.item())
 			D_losses.append(d_loss.item())
 			D_x.append(batches_done)
-
-		'''if epoch % 10 == 0:
-			config_mid = gen_name(CATEGORIES_AS_STR, LATENT_DIM, IMG_SIZE, epoch, LR, TRAIN_BATCH_SIZE, N_CRITIC)
-			print("Saved Encoder to {}".format(save_model(encoder, "caae_encoder", config_mid, today)))
-			print("Saved Decoder to {}".format(save_model(decoder, "caae_decoder", config_mid, today)))
-			print("Saved Discriminator to {}".format(save_model(discriminator, "caae_discriminator", config_mid, today)))
-			plot_losses("caae", G_losses, D_losses, config_mid, today)'''
 	
 	plot_losses("caae", G_losses, D_losses, D_x, CONFIG_AS_STR, opt.tag)
 	return encoder, decoder, discriminator
